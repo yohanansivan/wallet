@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, render_template, jsonify
 from datetime import datetime
 import sqlite3
 from enum import Enum
@@ -8,11 +8,6 @@ import bitcoin
 import hmac
 import hashlib
 from web3 import Web3
-
-
-# === Tables ===
-# Master - coin:str, seed:str, private_key:str, chain_code:str
-# Address - id:int, coin:str, address:str
 
 
 class Coin(Enum):
@@ -101,6 +96,11 @@ def get_wallet(coin):
     return wallet
 
 
+# === Tables ===
+# Master - coin:str, seed:str, private_key:str, chain_code:str
+# Address - id:int, coin:str, address:str
+
+
 app = Flask(__name__)
 database = 'db.sqlite3'
 
@@ -109,7 +109,7 @@ database = 'db.sqlite3'
 def get_index():
     logging.debug('get_index')
     now = datetime.now()
-    return f'[{now}] Hello from flask'
+    return render_template('index.jinja', now=now)
 
 
 @app.get('/generate_master/<coin>')
@@ -118,7 +118,7 @@ def get_generate_master(coin):
     now = datetime.now()
     wallet = get_wallet(coin)
     if wallet == None:
-        return f'[{now}] Error coin {coin} not supported'
+        return jsonify({'status': 'error', 'message': 'coin not supported', 'timestamp': f'{now}'})
     # Check if coin exist
     con = sqlite3.connect(database)
     cur = con.cursor()
@@ -126,14 +126,14 @@ def get_generate_master(coin):
     fetched = res.fetchall()
     if len(fetched) != 0:
         con.close()
-        return f'[{now}] Error master for {coin} already exist'
+        return jsonify({'status': 'error', 'message': 'master already exist', 'timestamp': f'{now}'})
     # Generate new master key
     seed, private_key, chain_code = wallet.generate_master()
     res = cur.execute("INSERT INTO master (coin, seed, private_key, chain_code) \
                       VALUES (?, ?, ?, ?);", (coin, seed, private_key, chain_code))
     con.commit()
     con.close()
-    return f'[{now}] Generated master keys for {coin}'
+    return jsonify({'status': 'ok', 'timestamp': f'{now}'})
 
 
 @app.get('/generate_address/<coin>')
@@ -142,16 +142,15 @@ def get_generate_address(coin):
     now = datetime.now()
     wallet = get_wallet(coin)
     if wallet == None:
-        return f'[{now}] Error coin {coin} not supported'
+        return jsonify({'status': 'error', 'message': 'coin not supported', 'timestamp': f'{now}'})
     # Get coin master keys
     con = sqlite3.connect(database)
     cur = con.cursor()
-    res = cur.execute('SELECT private_key, chain_code FROM master \
-                      WHERE coin = ?;', (coin,))
+    res = cur.execute('SELECT private_key, chain_code FROM master WHERE coin = ?;', (coin,))
     fetched = res.fetchall()
     if len(fetched) != 1:
         con.close()
-        return f'[{now}] Error coin do not have master keys'
+        return jsonify({'status': 'error', 'message': 'coin missing master key', 'timestamp': f'{now}'})
     private_key, chain_code = fetched[0]
     # Count the number of rows as new index
     res = cur.execute("SELECT COUNT(id) FROM address;")
@@ -164,7 +163,8 @@ def get_generate_address(coin):
                       VALUES (?, ?, ?);", (index, coin, child_address))
     con.commit()
     con.close()
-    return f'[{now}] Generated {child_address}'
+    return jsonify({'status': 'ok', 'index': f'{index}', 'coin': f'{coin}', 
+                    'address': f'{child_address}', 'timestamp': f'{now}'})
 
 
 @app.get('/list_address')
@@ -175,21 +175,22 @@ def get_list_address():
     cur = con.cursor()
     res = cur.execute("SELECT id, coin, address FROM address;")
     fetched = res.fetchall()
-    return f'[{now}] Fetched {fetched}'
+    list_address = [{'index': x[0], 'coin': x[1], 'address': x[2]} for x in fetched]
+    return jsonify({'status': 'ok', 'list_address': f'{list_address}', 'timestamp': f'{now}'})
 
 
-@app.get('/retrieve_address/<id>')
+@app.get('/retrieve_address/<int:id>')
 def get_retrieve_address(id):
     logging.debug('get_retrieve_address')
     now = datetime.now()
     con = sqlite3.connect(database)
     cur = con.cursor()
-    res = cur.execute("SELECT id, coin, address FROM address \
-                      WHERE id == ?;", id)
+    res = cur.execute("SELECT id, coin, address FROM address WHERE id == ?;", (id,))
     fetched = res.fetchall()
     if len(fetched) != 1:
-        return f'[{now}] Error not found address id'
-    return f'[{now}] Address: {fetched}'
+        return jsonify({'status': 'error', 'message': 'index not exist', 'timestamp': f'{now}'})
+    index, coin, address = fetched[0]
+    return jsonify({'status': 'ok', 'index': f'{index}', 'coin': f'{coin}', 'address': f'{address}', 'timestamp': f'{now}'})
 
 
 def main():

@@ -1,0 +1,4 @@
+flask>=2.2.3
+Django>=4.2
+bitcoin>=1.1.42
+web3>=6.2.0
